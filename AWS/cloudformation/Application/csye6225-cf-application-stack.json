@@ -1,0 +1,396 @@
+{
+   "AWSTemplateFormatVersion":"2010-09-09",
+   "Parameters":{
+      "EC2Instance":{ "Type":"String" },
+      "ImgBucket":{ "Type":"String" },
+      "S3Bucketname":{ "Type":"String" },
+      "PrivateSubnet":{ "Type":"String" },
+      "PublicSubnet":{ "Type":"String" },
+      "PublicSubnet2":{ "Type":"String" },
+      "WebServersSecurityGroup":{ "Type":"String" },
+      "DBSecurityGroup":{ "Type":"String" },
+      "InstanceProfileName":{ "Type":"String" },
+      "EC2CodeDeploy":{ "Type":"String" },
+      "EC2tagKey":{ "Type":"String" },
+      "DbName":{ "Type":"String" },
+      "CertArn":{ "Type":"String" },
+      "RefVpc":{ "Type":"String" },
+      "ZoneID":{ "Type":"String" },
+      "LoadBalancerGroup":{ "Type":"String" },
+      "DNSRecordName":{ "Type":"String" },
+      "RoleARN":{ "Type":"String" }
+   },
+   "Resources":{
+      "csye6225SnsTopic":{
+         "Type":"AWS::SNS::Topic",
+         "Properties":{
+            "TopicName":"EmailTopic"
+         }
+      },
+      "WebApplicationAutoScaling" : {
+         "Type" : "AWS::AutoScaling::AutoScalingGroup",
+         "Properties" : {
+            "VPCZoneIdentifier" : [{"Ref":"PublicSubnet"},{"Ref":"PublicSubnet2"}],
+            "DesiredCapacity" : "3",
+            "LaunchConfigurationName" : { "Ref" : "LaunchConfig" },
+            "MinSize" : "3",
+            "MaxSize" : "7",
+            "TargetGroupARNs" : [{ "Ref" : "ELBTargetGroup" }],
+            "Tags" : [
+               {"Key" : "Name", "Value" : {"Ref" : "LaunchConfig"}, "PropagateAtLaunch" : "true"},
+               {"Key" : "EC2tagKey","Value" : "EC2tagValue","PropagateAtLaunch" : "true"}]
+         }
+      },
+      "LaunchConfig" : {
+         "Type": "AWS::AutoScaling::LaunchConfiguration",
+         "Properties": {
+            "ImageId":"ami-66506c1c",
+            "KeyName":"EC2Pair",
+            "AssociatePublicIpAddress": "true",
+            "InstanceType":{ "Ref":"EC2Instance" },
+            "SecurityGroups" : [{"Ref" : "LoadBalancerGroup"}],
+            "IamInstanceProfile":{ "Ref":"InstanceProfileName" },
+            "UserData": {
+               "Fn::Base64":{
+                  "Fn::Join":[
+                     "",
+                     [
+                        "#!/bin/bash -xe \n ",
+                        "cd /home/ubuntu \n ",
+                        "sudo apt-get update \n ",
+                        "sudo apt-get install openjdk-8-jdk -y \n ",
+                        "sudo apt-get install ruby -y \n ",
+                        "sudo apt-get install wget -y \n ",
+                        "sudo apt-get install python -y \n ",
+                        "sudo apt-get update \n ",
+                        "sudo wget https://aws-codedeploy-us-east-1.s3.amazonaws.com/latest/install \n ",
+                        "sudo chmod +x ./install \n ",
+                        "sudo ./install auto \n ",
+                        "sudo service codedeploy-agent start \n ",
+                        "sudo apt-get install tomcat8 -y \n ",
+                        "sudo chown -R ubuntu /etc/default/tomcat8 \n ",
+                        "sudo echo \"JAVA_OPTS=\\\"\\${JAVA_OPTS} -Dspring.datasource.username=csye6225master -Dspring.datasource.password=csye6225password -Dspring.profiles.active=aws\\\"\" >> /etc/default/tomcat8 \n ",
+                        {
+                           "Fn::Join":[
+                              "",
+                              [
+                                 "sudo echo 'JAVA_OPTS=\"${JAVA_OPTS} -Dspring.datasource.url=\\\"jdbc:mysql://",
+                                 {
+                                    "Fn::GetAtt":[
+                                       "MyRDS",
+                                       "Endpoint.Address"
+                                    ]
+                                 },
+                                 ":3306/csye6225\\\"\"' >> /etc/default/tomcat8 \n"
+                              ]
+                           ]
+                        },
+                        {
+                           "Fn::Join":[
+                              "",
+                              [
+                                 "sudo echo 'JAVA_OPTS=\"${JAVA_OPTS} -DappImageBucketName=\\\"",
+                                 {
+                                    "Ref":"ImgBucket"
+                                 },
+                                 "\\\"\"' >> /etc/default/tomcat8 \n"
+                              ]
+                           ]
+                        },
+			"sudo service tomcat8 restart \n ",                        
+                        "sudo apt-get update \n",
+                        "sudo touch /home/ubuntu/awslogs.conf \n",
+                        "sudo echo '[general]' > /home/ubuntu/awslogs.conf \n",
+                        "sudo echo 'state_file= /var/awslogs/agent-state' >> /home/ubuntu/awslogs.conf \n",
+                        "sudo echo '[logstream1]' >> /home/ubuntu/awslogs.conf \n",
+                        "sudo echo 'file = /var/log/tomcat8/csye6225-aws.log' >> /home/ubuntu/awslogs.conf \n",
+                        "sudo echo 'log_group_name = csye6225-webapp' >> /home/ubuntu/awslogs.conf \n",
+                        "sudo echo 'log_stream_name = csye6225-webapp' >> /home/ubuntu/awslogs.conf \n",
+                        "sudo echo 'datetime_format = %d/%b/%Y:%H:%M:%S' >> /home/ubuntu/awslogs.conf \n",
+                        "sudo curl https://s3.amazonaws.com/aws-cloudwatch/downloads/latest/awslogs-agent-setup.py -O \n",
+                        {
+                           "Fn::Join": [
+                              " ",
+                              [
+                                 "sudo python ./awslogs-agent-setup.py -n -r",
+                                 {
+                                    "Ref": "AWS::Region"
+                                 },
+                                 "-c /home/ubuntu/awslogs.conf || error_exit 'Failed to run CloudWatch Logs agent setup' \n"
+                              ]
+                           ]
+                        },
+                        "cd /etc/systemd/system \n",
+                        "sudo touch awslogs.service \n",
+                        "sudo echo '[Unit]' >> awslogs.service \n",
+                        "sudo echo 'Description=Service for CloudWatch Logs agent' >> awslogs.service \n",
+                        "sudo echo 'After=rc-local.service' >> awslogs.service \n",
+                        "sudo echo '[Service]' >> awslogs.service \n",
+                        "sudo echo 'Type=simple' >> awslogs.service \n",
+                        "sudo echo 'Restart=always' >> awslogs.service \n",
+                        "sudo echo 'KillMode=process' >> awslogs.service \n",
+                        "sudo echo 'TimeoutSec=infinity' >> awslogs.service \n",
+                        "sudo echo 'PIDFile=/var/awslogs/state/awslogs.pid' >> awslogs.service \n",
+                        "sudo echo 'ExecStart=/var/awslogs/bin/awslogs-agent-launcher.sh --start --background --pidfile $PIDFILE --user awslogs --chuid awslogs &amp;' >> awslogs.service \n",
+                        "sudo echo '[Install]' >> awslogs.service \n",
+                        "sudo echo 'WantedBy=multi-user.target' >> awslogs.service \n",
+                        "sudo systemctl start awslogs.service \n",
+                        "sudo systemctl enable awslogs.service \n",
+                        "sudo curl https://s3.amazonaws.com/aws-cloudwatch/downloads/latest/awslogs-agent-setup.py -O \n",
+                        {
+                           "Fn::Join": [
+                              " ",
+                              [
+                                 "sudo python ./awslogs-agent-setup.py -n -r",
+                                 {
+                                    "Ref": "AWS::Region"
+                                 },
+                                 "-c /etc/systemd/system/awslogs.service || error_exit 'Failed to run CloudWatch Logs agent setup' \n"
+                              ]
+                           ]
+                        }
+                     ]
+                  ]
+               }
+            }
+         }
+      },
+      "WebServerScaleUpPolicy": {
+         "Type": "AWS::AutoScaling::ScalingPolicy",
+         "Properties": {
+            "AdjustmentType": "ChangeInCapacity",
+            "AutoScalingGroupName": {
+               "Ref": "WebApplicationAutoScaling"
+            },
+            "Cooldown": "60",
+            "ScalingAdjustment": "1"
+         }
+      },
+      "WebServerScaleDownPolicy": {
+         "Type": "AWS::AutoScaling::ScalingPolicy",
+         "Properties": {
+            "AdjustmentType": "ChangeInCapacity",
+            "AutoScalingGroupName": {
+               "Ref": "WebApplicationAutoScaling"
+            },
+            "Cooldown": "60",
+            "ScalingAdjustment": "-1"
+         }
+      },
+      "CPUAlarmHigh": {
+         "Type": "AWS::CloudWatch::Alarm",
+         "Properties": {
+            "AlarmDescription": "Scale-up if CPU > 90% for 10 minutes",
+            "MetricName": "CPUUtilization",
+            "Namespace": "AWS/EC2",
+            "Statistic": "Average",
+            "Period": "300",
+            "EvaluationPeriods": "2",
+            "Threshold": "30",
+            "AlarmActions": [
+               {
+                  "Ref": "WebServerScaleUpPolicy"
+               }
+            ],
+            "Dimensions": [
+               {
+                  "Name": "AutoScalingGroupName",
+                  "Value": {
+                     "Ref": "WebApplicationAutoScaling"
+                  }
+               }
+            ],
+            "ComparisonOperator": "GreaterThanThreshold"
+         }
+      },
+      "CPUAlarmLow": {
+         "Type": "AWS::CloudWatch::Alarm",
+         "Properties": {
+            "AlarmDescription": "Scale-down if CPU < 70% for 10 minutes",
+            "MetricName": "CPUUtilization",
+            "Namespace": "AWS/EC2",
+            "Statistic": "Average",
+            "Period": "300",
+            "EvaluationPeriods": "2",
+            "Threshold": "70",
+            "AlarmActions": [
+               {
+                  "Ref": "WebServerScaleDownPolicy"
+               }
+            ],
+            "Dimensions": [
+               {
+                  "Name": "AutoScalingGroupName",
+                  "Value": {
+                     "Ref": "WebApplicationAutoScaling"
+                  }
+               }
+            ],
+            "ComparisonOperator": "LessThanThreshold"
+         }
+      },
+      "myS3Bucket":{
+         "Type":"AWS::S3::Bucket",
+         "Properties":{
+            "BucketName":{
+               "Ref":"S3Bucketname"
+            }
+         }
+      },
+      "myPictureBucket":{
+         "Type":"AWS::S3::Bucket",
+         "Properties":{
+            "BucketName":{
+               "Ref":"ImgBucket"
+            }
+         }
+      },
+      "DynamoDB":{
+         "Type":"AWS::DynamoDB::Table",
+         "Properties":{
+            "AttributeDefinitions":[
+               {
+                  "AttributeName":"ID",
+                  "AttributeType":"S"
+               }
+            ],
+            "ProvisionedThroughput":{
+               "ReadCapacityUnits":1,
+               "WriteCapacityUnits":1
+            },
+            "KeySchema":[
+               {
+                  "AttributeName":"ID",
+                  "KeyType":"HASH"
+               }
+            ],
+            "TimeToLiveSpecification":{
+               "AttributeName":"ttl",
+               "Enabled":"TRUE"
+            },
+            "TableName":"csye6225"
+         }
+      },
+      "csye6225DBSubnetGroup":{
+         "Type":"AWS::RDS::DBSubnetGroup",
+         "Properties":{
+            "DBSubnetGroupDescription":"description",
+            "SubnetIds":[
+               {
+                  "Ref":"PrivateSubnet"
+               },
+               {
+                  "Ref":"PublicSubnet"
+               }
+            ],
+            "Tags":[ {
+               "Key":"Name",
+               "Value":"Subnetgroup"
+            }]
+         }
+      },
+      "MyRDS":{
+         "Type":"AWS::RDS::DBInstance",
+         "Properties":{
+            "AllocatedStorage":"16",
+            "Engine":"MYSQL",
+            "EngineVersion":"5.6.37",
+            "DBInstanceClass":"db.t2.micro",
+            "MultiAZ":"false",
+            "DBInstanceIdentifier":"csye6225-spring2018",
+            "AvailabilityZone":"us-east-1e",
+            "MasterUsername":"csye6225master",
+            "MasterUserPassword":"csye6225password",
+            "DBSubnetGroupName":{
+               "Ref":"csye6225DBSubnetGroup"
+            },
+            "VPCSecurityGroups":[
+               {
+                  "Ref":"DBSecurityGroup"
+               }
+            ],
+            "PubliclyAccessible":"false",
+            "DBName":{
+               "Ref":"DbName"
+            }
+         }
+      },
+      "ElasticLoadBalancer":{
+         "Type":"AWS::ElasticLoadBalancingV2::LoadBalancer",
+         "Properties": {
+            "Scheme" : "internet-facing",
+            "Subnets" : [{"Ref":"PublicSubnet"}, {"Ref":"PrivateSubnet"}],
+            "SecurityGroups" : [{"Ref" : "LoadBalancerGroup"}] 
+         }
+      },
+      "ElasticLoadBalancerListener1": {
+         "Type": "AWS::ElasticLoadBalancingV2::Listener",
+         "Properties" : {
+            "LoadBalancerArn" : {"Ref" : "ElasticLoadBalancer"},
+            "Port" : "8080",
+            "Protocol" : "HTTP",
+	    "DefaultActions" : [{
+               "Type" : "forward",
+               "TargetGroupArn" : { "Ref" : "ELBTargetGroup" }
+}]
+         }
+      },
+      "ElasticLoadBalancerListener2": {
+         "Type": "AWS::ElasticLoadBalancingV2::Listener",
+         "Properties" : {
+            "LoadBalancerArn" : {"Ref" : "ElasticLoadBalancer"},
+            "Certificates" : [{
+               "CertificateArn" : {"Ref" : "CertArn"}
+            }],
+            "Port" : "443",
+            "Protocol" : "HTTPS",
+	"DefaultActions" : [{
+               "Type" : "forward",
+               "TargetGroupArn" : { "Ref" : "ELBTargetGroup" }
+}]
+
+         }
+      },
+      "ELBTargetGroup": {
+         "Type" : "AWS::ElasticLoadBalancingV2::TargetGroup",
+         "Properties": {
+            "HealthCheckIntervalSeconds" : 30,
+            "HealthCheckTimeoutSeconds" : 5,
+            "HealthyThresholdCount" : 3,
+            "Port" : 8080,
+            "Protocol" : "HTTP",
+            "UnhealthyThresholdCount" : 5,
+            "VpcId" : {"Ref":"RefVpc"},
+	    "TargetGroupAttributes": [{
+               "Key": "stickiness.enabled",
+               "Value": "true"
+    }]
+         }
+      },
+      "myDNS":{
+         "Type":"AWS::Route53::RecordSet",
+         "Properties": {
+            "HostedZoneId":{"Ref":"ZoneID"},
+            "Comment":"Resource record for load balancer application.",
+
+            "Name" : {"Ref":"DNSRecordName"},
+            "Type":"A",
+            "AliasTarget": {
+               "HostedZoneId": { "Fn::GetAtt": ["ElasticLoadBalancer", "CanonicalHostedZoneID"] },
+               "DNSName": { "Fn::GetAtt": ["ElasticLoadBalancer", "DNSName"] }
+            }
+         }
+      },
+      "CloudDeployGroup": {
+         "Type" : "AWS::CodeDeploy::DeploymentGroup",
+         "Properties" : {
+            "ApplicationName" : "CloudDeployApplication",
+            "AutoScalingGroups" : [ {"Ref" : "WebApplicationAutoScaling" } ],
+            "ServiceRoleArn" : {"Ref" : "RoleARN"},
+            "DeploymentConfigName": "CodeDeployDefault.OneAtATime",
+            "DeploymentGroupName" : "CloudDeployGroup",
+            "Ec2TagFilters":[{"Type" : "KEY_AND_VALUE", "Key" : "EC2tagKey","Value" : "EC2tagValue"}]
+         }
+      }
+   }
+}

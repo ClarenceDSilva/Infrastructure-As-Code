@@ -1,0 +1,258 @@
+{
+    "AWSTemplateFormatVersion" : "2010-09-09",
+    "Parameters": {
+        "ArtifactBucketArn" : {"Type": "String"},
+        "ImageBucketArn" : {"Type": "String"},
+        "Resource1" : {"Type": "String"},
+        "Resource2" : {"Type": "String"},
+        "Resource3" : {"Type": "String"},
+        "Resource4" : {"Type": "String"}
+    },
+    "Resources" : {
+        "CodeDeployEcS" : {
+            "Type": "AWS::IAM::ManagedPolicy",
+            "Properties": {
+                "Users": ["travis"],
+                "ManagedPolicyName": "CodeDeploy-EC2-S3",
+                "PolicyDocument": {
+                    "Version" : "2012-10-17",
+                    "Statement": [
+                        {
+                            "Action": [
+                                "s3:Get*",
+                                "s3:List*"
+                            ],
+                            "Effect": "Allow",
+                            "Resource": {"Ref" : "ArtifactBucketArn"}
+                        }
+                    ]
+                }
+            },
+        },
+        "TravisCodeDeploy" : {
+            "Type": "AWS::IAM::ManagedPolicy",
+            "Properties": {
+                "Users": ["travis"],
+                "ManagedPolicyName": "Travis-CodeDeploy",
+                "PolicyDocument": {
+                    "Version" : "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "codedeploy:RegisterApplicationRevision",
+                                "codedeploy:GetApplicationRevision"
+                            ],
+                            "Resource": [
+                                {"Ref" : "Resource4"}
+                            ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "codedeploy:CreateDeployment",
+                                "codedeploy:GetDeployment"
+                            ],
+                            "Resource": [
+                                "*"
+                            ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "codedeploy:GetDeploymentConfig"
+                            ],
+                            "Resource": [
+                                {"Ref" : "Resource1"},
+                                {"Ref" : "Resource2"},
+                                {"Ref" : "Resource3"}
+                            ]
+                        }
+                    ]
+                }
+            },
+        },
+        "TravisUpload" : {
+            "Type": "AWS::IAM::ManagedPolicy",
+            "Properties": {
+                "ManagedPolicyName": "Travis-Upload-To-S3",
+                "Users": ["travis"],
+                "PolicyDocument": {
+                    "Version" : "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "s3:PutObject"
+                            ],
+                            "Resource": [
+                                {"Ref" : "ArtifactBucketArn"},
+                                {"Ref" : "ImageBucketArn"}
+                            ]
+                        }
+                    ]
+                }
+            },
+        },
+        "CloudWatchPolicy" : {
+            "Type": "AWS::IAM::ManagedPolicy",
+            "Properties": {
+                "ManagedPolicyName": "CloudWatch",
+                "Roles": [{"Ref" : "LabmdaExecutionRole"}],
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "logs:CreateLogGroup",
+                                "logs:CreateLogStream",
+                                "logs:PutLogEvents",
+                                "logs:DescribeLogStreams"
+                            ],
+                            "Resource": [
+                                "arn:aws:logs:*:*:*"
+                            ]
+                        }
+                    ]
+                }
+            },
+        },
+        "CodeDeployEC2ServiceRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "RoleName": "CodeDeployEC2ServiceRole",
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [{
+                        "Effect": "Allow",
+                        "Principal": {
+                            "Service": ["ec2.amazonaws.com"]
+                        },
+                        "Action": ["sts:AssumeRole"]
+                    }]
+                },
+                "Path": "/",
+                "Policies": [{
+                    "PolicyName": "Travis-CodeDeploy",
+                    "PolicyDocument": {
+                        "Version": "2012-10-17",
+                        "Statement": [{
+                            "Effect": "Allow",
+                            "Action": "*",
+                            "Resource": "*"
+                        }]
+                    }
+                }]
+            }
+        },
+        "LabmdaExecutionRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "ManagedPolicyArns": [
+                    "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+                    "arn:aws:iam::aws:policy/service-role/AWSLambdaDynamoDBExecutionRole",
+                    "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess",
+                    "arn:aws:iam::aws:policy/AmazonSESFullAccess"],
+                "RoleName": "AWSLabmdaExecutionRole",
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [{
+                        "Effect": "Allow",
+                        "Principal": {
+                            "Service": ["lambda.amazonaws.com"]
+                        },
+                        "Action": ["sts:AssumeRole"]
+                    }]
+                }
+            }
+        },
+        "RootInstanceProfile": {
+            "Type": "AWS::IAM::InstanceProfile",
+            "Properties": {
+                "InstanceProfileName": "EC2ServiceInstanceProfile",
+                "Path": "/",
+                "Roles": [{
+                    "Ref": "CodeDeployEC2ServiceRole"
+                }]
+            }
+        },
+        "CodeDeployServiceRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "RoleName": "CodeDeployServiceRole",
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [{
+                        "Effect": "Allow",
+                        "Principal": {
+                            "Service": ["codedeploy.amazonaws.com"]
+                        },
+                        "Action": ["sts:AssumeRole"]
+                    }]
+                },
+                "Policies": [{
+                    "PolicyName" : "AWSCodeDeployRole",
+                    "PolicyDocument": {
+                        "Version": "2012-10-17",
+                        "Statement": [
+                            {
+                                "Effect": "Allow",
+                                "Action": [
+                                    "autoscaling:CompleteLifecycleAction",
+                                    "autoscaling:DeleteLifecycleHook",
+                                    "autoscaling:DescribeAutoScalingGroups",
+                                    "autoscaling:DescribeLifecycleHooks",
+                                    "autoscaling:PutLifecycleHook",
+                                    "autoscaling:RecordLifecycleActionHeartbeat",
+                                    "autoscaling:CreateAutoScalingGroup",
+                                    "autoscaling:UpdateAutoScalingGroup",
+                                    "autoscaling:EnableMetricsCollection",
+                                    "autoscaling:DescribeAutoScalingGroups",
+                                    "autoscaling:DescribePolicies",
+                                    "autoscaling:DescribeScheduledActions",
+                                    "autoscaling:DescribeNotificationConfigurations",
+                                    "autoscaling:DescribeLifecycleHooks",
+                                    "autoscaling:SuspendProcesses",
+                                    "autoscaling:ResumeProcesses",
+                                    "autoscaling:AttachLoadBalancers",
+                                    "autoscaling:PutScalingPolicy",
+                                    "autoscaling:PutScheduledUpdateGroupAction",
+                                    "autoscaling:PutNotificationConfiguration",
+                                    "autoscaling:PutLifecycleHook",
+                                    "autoscaling:DescribeScalingActivities",
+                                    "autoscaling:DeleteAutoScalingGroup",
+                                    "ec2:DescribeInstances",
+                                    "ec2:DescribeInstanceStatus",
+                                    "ec2:TerminateInstances",
+                                    "tag:GetTags",
+                                    "tag:GetResources",
+                                    "sns:Publish",
+                                    "cloudwatch:DescribeAlarms",
+                                    "cloudwatch:PutMetricAlarm",
+                                    "elasticloadbalancing:DescribeLoadBalancers",
+                                    "elasticloadbalancing:DescribeInstanceHealth",
+                                    "elasticloadbalancing:RegisterInstancesWithLoadBalancer",
+                                    "elasticloadbalancing:DeregisterInstancesFromLoadBalancer",
+                                    "elasticloadbalancing:DescribeTargetGroups",
+                                    "elasticloadbalancing:DescribeTargetHealth",
+                                    "elasticloadbalancing:RegisterTargets",
+                                    "elasticloadbalancing:DeregisterTargets"
+                                ],
+                                "Resource": "*"
+                            }
+                        ]
+                    }
+                }]
+            }
+        },
+        "CloudDeployApplication": {
+            "Type": "AWS::CodeDeploy::Application",
+            "Properties": {
+                "ApplicationName" : "CloudDeployApplication",
+                "ComputePlatform": "Server"
+            }
+        }
+    }
+}
+
